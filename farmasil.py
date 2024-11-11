@@ -9,21 +9,12 @@ Session = sessionmaker(bind=engine)
 session = Session()
 Base = declarative_base()
 
-# Tabela associativa para o relacionamento muitos-para-muitos entre Gerente e Loja
-gerente_loja_associacao = Table(
-    'gerente_loja',
-    Base.metadata,
-    Column('gerente_id', Integer, ForeignKey('gerentes.id'), primary_key=True),
-    Column('loja_id', Integer, ForeignKey('lojas.id'), primary_key=True)
-)
-
 class Loja(Base):
     __tablename__ = 'lojas'
     id = Column(Integer, primary_key=True)
     nome = Column(String, nullable=False)
     endereco = Column(String, nullable=False)
     horario_funcionamento = Column(String, nullable=False)
-    gerentes = relationship('Gerente', secondary=gerente_loja_associacao, back_populates='lojas_gerenciadas')
     produtos = relationship("Produto", back_populates="loja")
     funcionarios = relationship("Funcionario", back_populates="loja")
 
@@ -66,17 +57,20 @@ class Loja(Base):
         else:
             print("Nenhuma loja cadastrada.")
 
-    def adicionar_gerente(self, gerente_id):
-        gerente = session.query(Gerente).filter_by(id=gerente_id).first()
-        if gerente:
-            if gerente not in self.gerentes:
-                self.gerentes.append(gerente)
-                session.commit()
-                print(f"Gerente {gerente.nome} adicionado à loja {self.nome}.")
+    @staticmethod
+    def consultar_funcionarios_loja(loja_id):
+        loja = session.query(Loja).filter_by(id=loja_id).first()
+        if loja:
+            if loja.funcionarios:
+                print(f"Funcionários da loja {loja.nome}:")
+                for funcionario in loja.funcionarios:
+                    print(f"ID: {funcionario.id}, Nome: {funcionario.nome}, Cargo: {funcionario.cargo}, "
+                          f"Salário: R${funcionario.salario:.2f}, Turno: {funcionario.turno}, "
+                          f"Data de Admissão: {funcionario.data_admissao}, Horas Trabalhadas: {funcionario.horas_trab}")
             else:
-                print(f"O gerente {gerente.nome} já está associado à loja {self.nome}.")
+                print(f"Nenhum funcionário cadastrado na loja {loja.nome}.")
         else:
-            print("Gerente não encontrado.")
+            print("Loja não encontrada.")
 
     def verificar_estoque_loja(self, loja_id):
         loja = session.query(Loja).filter_by(id=loja_id).first()
@@ -140,7 +134,6 @@ class Cliente(Base):
 class Funcionario(Base):
     __tablename__ = 'funcionarios'
     
-    loja = relationship("Loja", back_populates="funcionarios")
     id = Column(Integer, primary_key=True)
     nome = Column(String, nullable=False)
     cargo = Column(String, nullable=False)
@@ -153,32 +146,10 @@ class Funcionario(Base):
     loja = relationship("Loja", back_populates="funcionarios")
 
     def adicionar_funcionario(self, session):
-        """Adiciona o funcionário no banco de dados, verificando se é gerente ou não."""
-
-        # Verificar se o cargo é 'gerente'
-        if self.cargo == 'gerente':
-            # Verificar se o gerente já está registrado na tabela gerentes
-            gerente_existente = session.query(Gerente).filter_by(nome=self.nome).first()
-
-            if not gerente_existente:
-                # Se o gerente não existir, adiciona-o à tabela de gerentes
-                gerente = Gerente(nome=self.nome, cargo=self.cargo)
-                session.add(gerente)
-                session.commit()
-                print(f"Gerente {self.nome} adicionado à tabela de gerentes.")
-
-            # Após garantir que o gerente está na tabela de gerentes, adiciona o gerente à tabela de funcionários
-            funcionario = Funcionario(nome=self.nome, cargo=self.cargo, salario=self.salario, turno=self.turno, loja_id=self.loja_id)
-            session.add(funcionario)
-            session.commit()
-            print(f"Gerente {self.nome} adicionado como funcionário com sucesso!")
-        
-        else:
-            # Se não for gerente, registra como funcionário normal
-            session.add(self)
-            session.commit()
-            print(f"Funcionário {self.nome} adicionado com sucesso!")
-        
+        """Adiciona o funcionário no banco de dados."""
+        session.add(self)
+        session.commit()
+        print(f"Funcionário {self.nome} adicionado com sucesso!")
 
     def remover_funcionario(self, session):
         """Remove o funcionário do banco de dados."""
@@ -212,98 +183,6 @@ class Funcionario(Base):
         """
         print(relatorio)
         return relatorio
-
-class Gerente(Base):
-    __tablename__ = 'gerentes'
-
-    id = Column(Integer, primary_key=True)
-    nome = Column(String, nullable=False)
-    cargo = Column(String, nullable=False)
-
-    lojas_gerenciadas = relationship('Loja', secondary=gerente_loja_associacao, back_populates='gerentes')
-
-    def __init__(self, nome, cargo):
-        self.nome = nome
-        self.cargo = cargo
-
-    def gerenciar_lojas(self, funcionario):
-        # Verificar se o funcionário é um gerente
-        if funcionario.cargo.lower() != 'gerente':
-            print(f"Erro: {funcionario.nome} não tem acesso a este sistema, pois não é gerente.")
-            return  # Se não for gerente, interrompe a execução do método
-
-        print(f"Lojas gerenciadas por {self.nome}:")
-        for loja in self.lojas_gerenciadas:
-            print(f"- {loja.nome} (Endereço: {loja.endereco})")
-
-        escolha = input("Deseja transferir um funcionário ou ajustar o estoque? (transferir/estoque): ").lower()
-        if escolha == "transferir":
-            nome_funcionario = input("Informe o nome do funcionário a ser transferido: ")
-            novo_local = input("Informe o nome da nova loja: ")
-            self.transferir_funcionario(nome_funcionario, novo_local)
-        elif escolha == "estoque":
-            loja_nome = input("Informe o nome da loja: ")
-            produto_nome = input("Informe o nome do produto: ")
-            quantidade = int(input("Informe a quantidade para ajuste: "))
-            self.ajustar_estoque(loja_nome, produto_nome, quantidade)
-        else:
-            print("Ação inválida.")
-
-    def transferir_funcionario(self, nome_funcionario, nome_nova_loja):
-        if not self.verificar_acesso(funcionario):
-            return
-
-        funcionario = next((f for f in self.get_funcionarios() if f.nome == nome_funcionario), None)
-        nova_loja = next((l for l in self.lojas_gerenciadas if l.nome == nome_nova_loja), None)
-
-        if funcionario and nova_loja:
-            funcionario.loja = nova_loja
-            session.commit()
-            print(f"{funcionario.nome} foi transferido para a loja {nova_loja.nome}.")
-        else:
-            print("Funcionário ou loja não encontrados.")
-
-    def avaliar_funcionarios(self, funcionario):
-        if not self.verificar_acesso(funcionario):
-            return
-
-        print(f"Avaliando funcionários das lojas gerenciadas por {self.nome}:")
-        for loja in self.lojas_gerenciadas:
-            print(f"\nFuncionários na loja {loja.nome}:")
-            for funcionario in loja.funcionarios:
-                desempenho = len(funcionario.pedidos_processados)  # Assuming pedidos_processados is a list of processed orders
-                print(f"- {funcionario.nome}, Cargo: {funcionario.cargo}, Pedidos processados: {desempenho}")
-                if desempenho < 5:
-                    print(f"⚠ {funcionario.nome} precisa melhorar o desempenho.")
-                else:
-                    print(f"✔ {funcionario.nome} está com bom desempenho.")
-
-    def ajustar_estoque(self, loja_nome, produto_nome, quantidade, funcionario):
-        if not self.verificar_acesso(funcionario):
-            return
-
-        loja = next((l for l in self.lojas_gerenciadas if l.nome == loja_nome), None)
-        if loja:
-            produto = next((p for p in loja.produtos if p.nome == produto_nome), None)
-            if produto:
-                produto.estoque += quantidade
-                session.commit()
-                print(f"Estoque de {produto_nome} ajustado para {produto.estoque} unidades.")
-            else:
-                print(f"Produto {produto_nome} não encontrado na loja {loja_nome}.")
-        else:
-            print(f"Loja {loja_nome} não encontrada.")
-
-    @staticmethod
-    def alterar_preco(produto_id, novo_preco, session):
-        """Altera o preço de um produto."""
-        produto = session.query(Produto).get(produto_id)
-        if produto:
-            produto.preco = novo_preco
-            session.commit()
-            print(f"Preço do produto ID {produto_id} atualizado para R${novo_preco:.2f}.")
-        else:
-            print(f"Produto ID {produto_id} não encontrado.")
 
 class Pedido(Base):
     __tablename__ = 'pedidos'
@@ -440,6 +319,54 @@ class RegistroCaixa(Base):
     caixa_id = Column(Integer, ForeignKey('caixas.id'), nullable=False)
     data_hora = Column(String, default="CURRENT_TIMESTAMP")  # Registrar a data e hora da operação
 
+class Fornecedor(Base):
+    __tablename__ = 'fornecedores'
+    
+    id = Column(Integer, primary_key=True)
+    nome = Column(String, nullable=False)
+    cnpj = Column(String, unique=True, nullable=False)
+    telefone = Column(String, nullable=False)
+    endereco = Column(String, nullable=False)
+    produtos = relationship("Produto", back_populates="fornecedor_relacionado")  
+
+    def __init__(self, nome, cnpj, telefone, endereco):
+        self.nome = nome
+        self.cnpj = cnpj
+        self.telefone = telefone
+        self.endereco = endereco
+
+    def adicionar_fornecedor(self, session):
+        """Adiciona um novo fornecedor ao banco de dados."""
+        session.add(self)
+        session.commit()
+        print(f"Fornecedor {self.nome} adicionado com sucesso!")
+
+    def atualizar_dados_fornecedor(self, session, nome=None, telefone=None, endereco=None):
+        """Atualiza os dados de um fornecedor."""
+        if nome:
+            self.nome = nome
+        if telefone:
+            self.telefone = telefone
+        if endereco:
+            self.endereco = endereco
+        session.commit()
+        print(f"Dados do fornecedor {self.nome} atualizados com sucesso!")
+
+    def consultar_dados_fornecedor(self, session):
+        """Consulta os dados de um fornecedor específico."""
+        print(f"Fornecedor ID {self.id}: {self.nome}, CNPJ: {self.cnpj}, Telefone: {self.telefone}, Endereço: {self.endereco}")
+
+    @staticmethod
+    def listar_fornecedores(session):
+        """Lista todos os fornecedores cadastrados."""
+        fornecedores = session.query(Fornecedor).all()
+        if fornecedores:
+            for fornecedor in fornecedores:
+                print(f"Fornecedor ID {fornecedor.id}: {fornecedor.nome}, CNPJ: {fornecedor.cnpj}, Telefone: {fornecedor.telefone}")
+        else:
+            print("Nenhum fornecedor encontrado.")
+
+
 class Produto(Base):
     __tablename__ = 'produtos'
 
@@ -449,21 +376,41 @@ class Produto(Base):
     categoria = Column(String, nullable=False)
     estoque = Column(Integer, default=0)
     loja_id = Column(Integer, ForeignKey('lojas.id'))  # Relacionamento com Loja
+    fornecedor_id = Column(Integer, ForeignKey('fornecedores.id'))
     loja = relationship("Loja", back_populates="produtos")
+    fornecedor_relacionado = relationship("Fornecedor", back_populates="produtos")
     itens_pedido = relationship("ItensPedido", back_populates="produto")
 
-    def __init__(self, nome, preco, estoque,categoria, loja_id):
+    def __init__(self, nome, preco, estoque, categoria, loja_id, fornecedor_id):
         self.nome = nome
         self.preco = preco
         self.categoria = categoria
         self.estoque = estoque
         self.loja_id = loja_id
+        self.fornecedor_id = fornecedor_id
 
     def adicionar_produto(self, session):
         """Adiciona um novo produto ao banco de dados."""
         session.add(self)
         session.commit()
         print(f"Produto {self.nome} adicionado com sucesso!")
+
+    def ajustar_estoque(self, session, quantidade):
+        """Ajusta o estoque do produto atual."""
+        self.estoque += quantidade
+        session.commit()
+        print(f"Estoque do produto {self.nome} ajustado para {self.estoque} unidades.")
+
+    @staticmethod
+    def alterar_preco(produto_id, novo_preco, session):
+        """Altera o preço de um produto específico."""
+        produto = session.query(Produto).get(produto_id)
+        if produto:
+            produto.preco = novo_preco
+            session.commit()
+            print(f"Preço do produto ID {produto_id} atualizado para R${novo_preco:.2f}.")
+        else:
+            print(f"Produto ID {produto_id} não encontrado.")
 
     @staticmethod
     def consultar_produto(produto_id, session):
@@ -477,7 +424,7 @@ class Produto(Base):
             print(f"Loja ID: {produto.loja_id}")
         else:
             print(f"Produto ID {produto_id} não encontrado.")
-            
+
     @staticmethod
     def buscar_produtos_por_categoria(categoria, session):
         """Busca todos os produtos de uma determinada categoria."""
@@ -523,10 +470,10 @@ def menu_principal():
         print("1. Gerenciar Lojas")
         print("2. Gerenciar Clientes")
         print("3. Gerenciar Funcionários")
-        print("4. Gerenciar Gerentes")
-        print("5. Gerenciar Pedidos")
-        print("6. Gerenciar Caixa")
-        print("7. Gerenciar Produtos")
+        print("4. Gerenciar Pedidos")
+        print("5. Gerenciar Caixa")
+        print("6. Gerenciar Produtos")
+        print("7. Gerenciar Fornecedores")  # Nova opção para Fornecedores
         print("0. Sair")
         
         opcao = input("Escolha uma opção: ")
@@ -538,13 +485,13 @@ def menu_principal():
         elif opcao == "3":
             menu_funcionario()
         elif opcao == "4":
-            menu_gerente()
-        elif opcao == "5":
             menu_pedidos()
-        elif opcao == "6":
+        elif opcao == "5":
             menu_caixa()
-        elif opcao == "7":
+        elif opcao == "6":
             menu_produtos()
+        elif opcao == "7":
+            menu_fornecedor()  # Chama o submenu de fornecedores
         elif opcao == "0":
             print("Saindo do sistema...")
             break
@@ -559,9 +506,9 @@ def menu_loja():
         print("2. Atualizar Dados da Loja")
         print("3. Consultar Dados da Loja")
         print("4. Listar Todas as Lojas")
-        print("5. Verificar Estoque da Loja")
-        print("6. Remover Loja")
-        print("7. Adicionar Gerente a Loja")
+        print("5. Consultar Funcionários da Loja")
+        print("6. Verificar Estoque da Loja")
+        print("7. Remover Loja")
         print("0. Voltar")
         
         opcao = input("Escolha uma opção: ")
@@ -588,20 +535,15 @@ def menu_loja():
         
         elif opcao == "5":
             loja_id = int(input("ID da loja: "))
-            Loja().verificar_estoque_loja(loja_id)
+            Loja().consultar_funcionarios_loja(loja_id)
         
         elif opcao == "6":
-            loja_id = int(input("ID da loja a ser removida: "))
-            Loja().remover_loja(loja_id)
+            loja_id = int(input("ID da loja: "))
+            Loja().verificar_estoque_loja(loja_id)
         
         elif opcao == "7":
-            loja_id = int(input("ID da loja: "))
-            loja = session.query(Loja).filter_by(id=loja_id).first()
-            if loja:
-                gerente_id = int(input("ID do gerente a ser adicionado: "))
-                loja.adicionar_gerente(gerente_id)
-            else:
-                print("Loja não encontrada.")
+            loja_id = int(input("ID da loja a ser removida: "))
+            Loja().remover_loja(loja_id)
         
         elif opcao == "0":
             break
@@ -816,90 +758,11 @@ def menu_funcionario():
         else:
             print("Opção inválida. Tente novamente.")
 
-
-def menu_gerente():
-    while True:
-        print("\n--- Gerenciamento de Gerentes ---")
-        print("1. Ver Lojas Gerenciadas")
-        print("2. Transferir Funcionário")
-        print("3. Ajustar Estoque de um Produto")
-        print("4. Avaliar Funcionários")
-        print("5. Alterar Preço de um Produto")
-        print("0. Voltar")
-        
-        opcao = input("Escolha uma opção: ")
-        
-        # Obter o ID do funcionário atual
-        funcionario_id = int(input("Informe o ID do seu usuário (funcionário): "))
-        funcionario_atual = session.query(Funcionario).filter_by(id=funcionario_id).first()
-
-        # Verificar se o funcionário é gerente
-        if not funcionario_atual or funcionario_atual.cargo.lower() != 'gerente':
-            print(f"Erro: {funcionario_atual.nome if funcionario_atual else 'Funcionário'} não tem acesso a este sistema, pois não é gerente.")
-            continue  # Se não for gerente, volta ao menu
-        
-        # A partir daqui, o funcionário é um gerente, e o código pode continuar
-        if opcao == "1":
-            gerente_id = int(input("ID do gerente: "))
-            gerente = session.query(Gerente).filter_by(id=gerente_id).first()
-            if gerente:
-                gerente.gerenciar_lojas(funcionario_atual)
-            else:
-                print("Gerente não encontrado.")
-        
-        elif opcao == "2":
-            gerente_id = int(input("ID do gerente: "))
-            gerente = session.query(Gerente).filter_by(id=gerente_id).first()
-            if gerente:
-                nome_funcionario = input("Nome do funcionário a ser transferido: ")
-                nova_loja = input("Nome da nova loja: ")
-                gerente.transferir_funcionario(nome_funcionario, nova_loja, funcionario_atual)
-            else:
-                print("Gerente não encontrado.")
-        
-        elif opcao == "3":
-            gerente_id = int(input("ID do gerente: "))
-            gerente = session.query(Gerente).filter_by(id=gerente_id).first()
-            if gerente:
-                loja_nome = input("Nome da loja: ")
-                produto_nome = input("Nome do produto: ")
-                quantidade = int(input("Quantidade para ajuste: "))
-                gerente.ajustar_estoque(loja_nome, produto_nome, quantidade, funcionario_atual)
-            else:
-                print("Gerente não encontrado.")
-        
-        elif opcao == "4":
-            gerente_id = int(input("ID do gerente: "))
-            gerente = session.query(Gerente).filter_by(id=gerente_id).first()
-            if gerente:
-                gerente.avaliar_funcionarios(funcionario_atual)
-            else:
-                print("Gerente não encontrado.")
-        
-        elif opcao == "5":
-            # Alterar preço de um produto (somente se o funcionário for gerente)
-            gerente_id = int(input("ID do gerente: "))
-            gerente = session.query(Gerente).filter_by(id=gerente_id).first()
-            if gerente:
-                produto_id = int(input("ID do produto a ter o preço alterado: "))
-                novo_preco = float(input("Novo preço do produto: R$ "))
-                Gerente.alterar_preco(produto_id, novo_preco, session)
-            else:
-                print("Gerente não encontrado.")
-        
-        elif opcao == "0":
-            break
-        
-        else:
-            print("Opção inválida. Tente novamente.")
-    return
-
 def menu_pedidos():
     while True:
         print("\n--- Gerenciamento de Pedidos ---")
         print("1. Realizar Pedido")
-        print("2. Remover Item de Pedido")
-        print("3. Consultar Pedidos de um Cliente")
+        print("2. Consultar Pedidos de um Cliente")
         print("0. Voltar")
         
         opcao = input("Escolha uma opção: ")
@@ -928,17 +791,8 @@ def menu_pedidos():
                 pedido.realizar_pedido(cliente_id, funcionario_id, itens)
             else:
                 print("Nenhum item foi adicionado ao pedido.")
-
-        elif opcao == "2":
-            pedido_id = int(input("ID do Pedido: "))
-            item_nome = input("Nome do item a ser removido: ")
-            pedido = session.query(Pedido).filter_by(id=pedido_id).first()
-            if pedido:
-                pedido.remover_item_pedido(pedido_id, item_nome)
-            else:
-                print("Pedido não encontrado.")
         
-        elif opcao == "3":
+        elif opcao == "2":
             cliente_id = int(input("ID do Cliente: "))
             pedido = Pedido()  # Criar uma instância de Pedido para chamar o método
             pedido.consultar_pedidos_cliente(cliente_id)
@@ -946,6 +800,52 @@ def menu_pedidos():
         elif opcao == "0":
             break  # Volta ao menu principal
         
+        else:
+            print("Opção inválida. Tente novamente.")
+def menu_fornecedor():
+    while True:
+        print("\n--- Gerenciar Fornecedores ---")
+        print("1. Adicionar Fornecedor")
+        print("2. Remover Fornecedor")
+        print("3. Atualizar Dados de Fornecedor")
+        print("4. Consultar Fornecedor")
+        print("0. Voltar ao Menu Principal")
+        
+        opcao = input("Escolha uma opção: ")
+        
+        if opcao == "1":
+            nome = input("Nome do fornecedor: ")
+            cnpj = input("CNPJ do fornecedor: ")
+            telefone = input("Telefone do fornecedor: ")
+            endereco = input("Endereço do fornecedor (opcional): ")
+            fornecedor = Fornecedor(nome=nome, cnpj=cnpj, telefone=telefone, endereco=endereco)
+            fornecedor.adicionar_fornecedor(session)
+        elif opcao == "2":
+            fornecedor_id = int(input("ID do fornecedor para remover: "))
+            fornecedor = session.query(Fornecedor).get(fornecedor_id)
+            if fornecedor:
+                fornecedor.remover_fornecedor(session)
+            else:
+                print("Fornecedor não encontrado.")
+        elif opcao == "3":
+            fornecedor_id = int(input("ID do fornecedor para atualizar: "))
+            fornecedor = session.query(Fornecedor).get(fornecedor_id)
+            if fornecedor:
+                novo_nome = input("Novo nome (deixe em branco para não alterar): ")
+                novo_telefone = input("Novo telefone (deixe em branco para não alterar): ")
+                novo_endereco = input("Novo endereço (deixe em branco para não alterar): ")
+                fornecedor.atualizar_dados_fornecedor(session, novo_nome, novo_telefone, novo_endereco)
+            else:
+                print("Fornecedor não encontrado.")
+        elif opcao == "4":
+            fornecedor_id = int(input("ID do fornecedor para consultar: "))
+            fornecedor = session.query(Fornecedor).get(fornecedor_id)
+            if fornecedor:
+                fornecedor.consultar_dados_fornecedor(session)  # Altere para o nome correto do método
+            else:
+                print("Fornecedor não encontrado.")
+        elif opcao == "0":
+            break
         else:
             print("Opção inválida. Tente novamente.")
 
@@ -958,6 +858,8 @@ def menu_produtos():
         print("4. Buscar Produtos por Categoria")
         print("5. Verificar Estoque de Produto")
         print("6. Listar Produtos de uma Loja")
+        print("7. Ajustar Estoque de Produto")
+        print("8. Alterar Preço de Produto")
         print("0. Voltar")
         
         opcao = input("Escolha uma opção: ")
@@ -968,7 +870,8 @@ def menu_produtos():
             estoque = int(input("Digite a quantidade em estoque: "))
             categoria = input("Digite a categoria do produto: ")
             loja_id = int(input("Digite o ID da loja: "))
-            novo_produto = Produto(nome, preco, estoque, categoria,loja_id)
+            fornecedor_id = int(input("Digite o ID do fornecedor: "))  # Agora solicitando o fornecedor_id
+            novo_produto = Produto(nome, preco, estoque, categoria, loja_id, fornecedor_id)
             novo_produto.adicionar_produto(session)
         
         elif opcao == "2":
@@ -991,6 +894,20 @@ def menu_produtos():
         elif opcao == "6":
             loja_id = int(input("Digite o ID da loja para listar os produtos: "))
             Produto.listar_produtos_loja(loja_id, session)
+        
+        elif opcao == "7":
+            produto_id = int(input("Digite o ID do produto para ajustar o estoque: "))
+            quantidade = int(input("Digite a quantidade a ser ajustada (positiva para aumentar, negativa para diminuir): "))
+            produto = session.query(Produto).get(produto_id)
+            if produto:
+                produto.ajustar_estoque(session, quantidade)
+            else:
+                print(f"Produto ID {produto_id} não encontrado.")
+        
+        elif opcao == "8":
+            produto_id = int(input("Digite o ID do produto para alterar o preço: "))
+            novo_preco = float(input("Digite o novo preço do produto: "))
+            Produto.alterar_preco(produto_id, novo_preco, session)
         
         elif opcao == "0":
             break  # Volta ao menu principal
