@@ -66,13 +66,6 @@ class Loja(Base):
         else:
             print("Nenhuma loja cadastrada.")
 
-    def consultar_funcionarios_loja(self, loja_id):
-        loja = session.query(Loja).filter_by(id=loja_id).first()
-        if loja:
-            print(f"Funcionários da loja {loja.nome}: {loja.funcionarios if loja.funcionarios else 'Nenhum funcionário cadastrado.'}")
-        else:
-            print("Loja não encontrada.")
-
     def adicionar_gerente(self, gerente_id):
         gerente = session.query(Gerente).filter_by(id=gerente_id).first()
         if gerente:
@@ -566,10 +559,9 @@ def menu_loja():
         print("2. Atualizar Dados da Loja")
         print("3. Consultar Dados da Loja")
         print("4. Listar Todas as Lojas")
-        print("5. Consultar Funcionários da Loja")
-        print("6. Verificar Estoque da Loja")
-        print("7. Remover Loja")
-        print("8. Adicionar Gerente a Loja")
+        print("5. Verificar Estoque da Loja")
+        print("6. Remover Loja")
+        print("7. Adicionar Gerente a Loja")
         print("0. Voltar")
         
         opcao = input("Escolha uma opção: ")
@@ -596,17 +588,13 @@ def menu_loja():
         
         elif opcao == "5":
             loja_id = int(input("ID da loja: "))
-            Loja().consultar_funcionarios_loja(loja_id)
-        
-        elif opcao == "6":
-            loja_id = int(input("ID da loja: "))
             Loja().verificar_estoque_loja(loja_id)
         
-        elif opcao == "7":
+        elif opcao == "6":
             loja_id = int(input("ID da loja a ser removida: "))
             Loja().remover_loja(loja_id)
         
-        elif opcao == "8":
+        elif opcao == "7":
             loja_id = int(input("ID da loja: "))
             loja = session.query(Loja).filter_by(id=loja_id).first()
             if loja:
